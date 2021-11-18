@@ -162,6 +162,9 @@ trap_dispatch(struct trapframe *tf) {
          * (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
          * (3) Too Simple? Yes, I think so!
          */
+	ticks++;
+        if(ticks % TICK_NUM == 0)
+            print_ticks();
         break;
     case IRQ_OFFSET + IRQ_COM1:
         c = cons_getc();
@@ -196,17 +199,6 @@ trap_dispatch(struct trapframe *tf) {
  * */
 void
 trap(struct trapframe *tf) {
-/* trap_dispatch - dispatch based on what type of trap occurred */
-static void trap_dispatch(struct trapframe *tf) {
-    char c;
-    switch (tf->tf_trapno) {
-    case IRQ_OFFSET + IRQ_TIMER:
-        // 全局变量ticks定义于kern/driver/clock.c
-        ticks++;
-        if(ticks % TICK_NUM == 0)
-            print_ticks();
-        break;
-    // .........
     // dispatch based on what type of trap occurred
     trap_dispatch(tf);
 }
