@@ -26,6 +26,8 @@
 
     ![5](Pics/5.png)
 
+
+
 ### 练习2
 
 - 从CPU加电后执行的第一条指令开始，单步跟踪BIOS的执行。
@@ -124,6 +126,8 @@
 
   - 可见其汇编代码相同，并在输入continue后qemu正常工作。
 
+
+
 ### 练习3
 
 分析bootloader进入保护模式的过程。
@@ -151,12 +155,164 @@
 
 ![20](Pics/20.png)
 
-进入保护模式
+##### 进入保护模式
 
 <img src="Pics/21.png" alt="21"  />
 
-通过长跳转更新cs的基地址，设置段寄存器，并建立堆栈
+##### 通过长跳转更新cs的基地址，设置段寄存器，并建立堆栈
 
-![22](Lab1.assets/22.png)转到保护模式完成，进入boot主方法
+##### ![22](Pics/22.png)转到保护模式完成，进入boot主方法
 
 ![23](Pics/23.png)
+
+
+
+### 练习4
+
+分析bootloader加载ELF格式的OS的过程
+
+- bootloader如何读取硬盘扇区的？
+
+  - bootloader让CPU进入保护模式后，下一步的工作就是从硬盘上加载并运行OS。考虑到实现的简单性，bootloader的访问硬盘都是LBA模式的PIO（Program IO）方式，即所有的IO操作是通过CPU访问硬盘的IO地址寄存器完成。
+
+  - 实现代码：
+
+    ```c
+    /* waitdisk - wait for disk ready */
+    static void waitdisk(void) {
+        // 获取并判断磁盘是否处于忙碌状态
+        while ((inb(0x1F7) & 0xC0) != 0x40)
+            /* do nothing */;
+    }
+    /* readsect - read a single sector at @secno into @dst */
+    static void readsect(void *dst, uint32_t secno) {
+        // 等待磁盘准备就绪
+        waitdisk();
+        // 设置磁盘参数
+        outb(0x1F2, 1);                         // 读取1个扇区
+        outb(0x1F3, secno & 0xFF);              // 0x1F3-0x1F6 设置LBA模式的参数
+        outb(0x1F4, (secno >> 8) & 0xFF);
+        outb(0x1F5, (secno >> 16) & 0xFF);
+        outb(0x1F6, ((secno >> 24) & 0xF) | 0xE0);
+        outb(0x1F7, 0x20);                      // 设置磁盘命令为“读取”
+        // 等待磁盘准备就绪
+        waitdisk();
+        // 从0x1F0端口处读数据
+        insl(0x1F0, dst, SECTSIZE / 4);
+    }
+    ```
+
+- bootloader是如何加载ELF格式的OS？
+
+  - bootloader先将ELF格式的OS加载到地址`0x10000`。
+
+    ```c
+    readseg((uintptr_t)ELFHDR, SECTSIZE * 8, 0);
+    ```
+
+  - 之后通过比对ELF的magic number来判断读入的ELF文件是否正确。
+
+  - 再将ELF中每个段都加载到特定的地址。
+
+    ```c
+    // load each program segment (ignores ph flags)
+    ph = (struct proghdr *)((uintptr_t)ELFHDR + ELFHDR->e_phoff);
+    eph = ph + ELFHDR->e_phnum;
+    for (; ph < eph; ph ++)
+        readseg(ph->p_va & 0xFFFFFF, ph->p_memsz, ph->p_offset);
+    ```
+
+  - 最后跳转至ELF文件的程序入口点(entry point)。
+
+### 练习5
+
+- 实现函数调用堆栈跟踪函数
+
+  编写写代码 `print_stackframe(void)` 
+
+  ![24](Pics/24.png)
+
+  使用指令 `make qemu` 进行验证：
+
+  ```c
+  [~/OS_lab/labcodes/lab1]
+  moocos-> make qemu
+  + cc kern/debug/kdebug.c
+  + ld bin/kernel
+  10000+0 records in
+  10000+0 records out
+  5120000 bytes (5.1 MB) copied, 0.0554875 s, 92.3 MB/s
+  1+0 records in
+  1+0 records out
+  512 bytes (512 B) copied, 0.000954689 s, 536 kB/s
+  146+1 records in
+  146+1 records out
+  74871 bytes (75 kB) copied, 0.00255493 s, 29.3 MB/s
+  (THU.CST) os is loading ...
+  
+  Special kernel symbols:
+    entry  0x00100000 (phys)
+    etext  0x001032e4 (phys)
+    edata  0x0010ea16 (phys)
+    end    0x0010fd20 (phys)
+  Kernel executable memory footprint: 64KB
+  ebp:0x00007b08 eip:0x001009a6 args:0x00010094 0x00000000 0x00007b38 0x00100092 
+      kern/debug/kdebug.c:307: print_stackframe+21
+  ebp:0x00007b18 eip:0x00100ca3 args:0x00000000 0x00000000 0x00000000 0x00007b88 
+      kern/debug/kmonitor.c:125: mon_backtrace+10
+  ebp:0x00007b38 eip:0x00100092 args:0x00000000 0x00007b60 0xffff0000 0x00007b64 
+      kern/init/init.c:48: grade_backtrace2+33
+  ebp:0x00007b58 eip:0x001000bb args:0x00000000 0xffff0000 0x00007b84 0x00000029 
+      kern/init/init.c:53: grade_backtrace1+38
+  ebp:0x00007b78 eip:0x001000d9 args:0x00000000 0x00100000 0xffff0000 0x0000001d 
+      kern/init/init.c:58: grade_backtrace0+23
+  ebp:0x00007b98 eip:0x001000fe args:0x0010331c 0x00103300 0x0000130a 0x00000000 
+      kern/init/init.c:63: grade_backtrace+34
+  ebp:0x00007bc8 eip:0x00100055 args:0x00000000 0x00000000 0x00000000 0x00010094 
+      kern/init/init.c:28: kern_init+84
+  ebp:0x00007bf8 eip:0x00007d68 args:0xc031fcfa 0xc08ed88e 0x64e4d08e 0xfa7502a8 
+      <unknow>: -- 0x00007d67 --
+  ++ setup timer interrupts
+  ```
+
+  将输出结果与答案验证，显示结果大致一致。
+
+- 解释最后一行各个数值的含义
+  - 最后一行是`ebp:0x00007bf8 eip:0x00007d68 args:0xc031fcfa 0xc08ed88e 0x64e4d08e 0xfa7502a8 `，共有ebp，eip和args三类参数，分别表示调用发生的文件、调用发生所在行和调用函数名。
+
+### 练习6
+
+- 完善中断初始化和处理
+
+  - 在mmu.h中找到表项结构的定义：
+
+    ```h
+    /* Gate descriptors for interrupts and traps */
+    struct gatedesc {
+        unsigned gd_off_15_0 : 16;        // low 16 bits of offset in segment
+        unsigned gd_ss : 16;            // segment selector
+        unsigned gd_args : 5;            // # args, 0 for interrupt/trap gates
+        unsigned gd_rsv1 : 3;            // reserved(should be zero I guess)
+        unsigned gd_type : 4;            // type(STS_{TG,IG32,TG32})
+        unsigned gd_s : 1;                // must be 0 (system)
+        unsigned gd_dpl : 2;            // descriptor(meaning new) privilege level
+        unsigned gd_p : 1;                // Present
+        unsigned gd_off_31_16 : 16;        // high bits of offset in segment
+    };
+    ```
+
+  - 该表项的大小为`16+16+5+3+4+1+2+1+16 == 8*8`bit，即**8字节**。
+
+  - 根据IDT表项的结构，我们可以得知，IDT表项的第二个成员`gd_ss`为段选择子，第一个成员`gd_off_15_0`和最后一个成员`gd_off_31_16`共同组成一个段内偏移地址。根据段选择子和段内偏移地址就可以得出中断处理程序的地址。
+
+- 编程完善kern/trap/trap.c中对中断向量表进行初始化的函数idt_init.
+
+  - 代码如下：
+
+    ![25](Pics/25.png)
+
+- 编程完善trap.c中的中断处理函数trap，在对时钟中断进行处理的部分填写trap函数中处理时钟中断的部分，使操作系统每遇到100次时钟中断后，调用print_ticks子程序，向屏幕上打印一行文字”100 ticks”。
+
+  - 代码如下：
+
+    ![26](Pics/26.png)
