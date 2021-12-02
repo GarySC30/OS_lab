@@ -107,24 +107,30 @@ default_init(void) {
 static void
 default_init_memmap(struct Page *base, size_t n) {
     assert(n > 0);
+// 设置当前页向后的n个页
     struct Page *p = base;
     for (; p != base + n; p ++) {
         assert(PageReserved(p));
         p->flags = p->property = 0;
         set_page_ref(p, 0);
     }
+ // 设置free pages的数量
     base->property = n;
+// 设置当前页为可用
     SetPageProperty(base);
+// 设置总共的空闲内存页面
     nr_free += n;
-    list_add(&free_list, &(base->page_link));
+    list_add_before(&free_list, &(base->page_link));
 }
 
 static struct Page *
 default_alloc_pages(size_t n) {
     assert(n > 0);
+// 如果待分配的空闲页面数量小于所需的内存数量
     if (n > nr_free) {
         return NULL;
     }
+ // 查找符合要求的连续页
     struct Page *page = NULL;
     list_entry_t *le = &free_list;
     while ((le = list_next(le)) != &free_list) {
@@ -135,15 +141,17 @@ default_alloc_pages(size_t n) {
         }
     }
     if (page != NULL) {
-        list_del(&(page->page_link));
-        if (page->property > n) {
-            struct Page *p = page + n;
-            p->property = page->property - n;
-            list_add(&free_list, &(p->page_link));
-    }
-        nr_free -= n;
-        ClearPageProperty(page);
-    }
+    	if (page->property > n) {
+       		struct Page *p = page + n;
+       		p->property = page->property - n;
+       		SetPageProperty(p);
+       		// 注意这一步add after
+        	list_add_after(&(page->page_link), &(p->page_link));
+   	    }
+    	    list_del(&(page->page_link));
+    	    nr_free -= n;
+    	    ClearPageProperty(page);
+	}
     return page;
 }
 
@@ -175,7 +183,20 @@ default_free_pages(struct Page *base, size_t n) {
         }
     }
     nr_free += n;
+#if 0
     list_add(&free_list, &(base->page_link));
+#else
+    // myLAB2 链表按照低地址到高地址的顺序排列，因此要查找插入点
+    for(le = list_next(&free_list); le != &free_list; le = list_next(le))
+    {
+        p = le2page(le, page_link);
+        if (base + base->property <= p) {
+            assert(base + base->property != p);
+            break;
+        }
+    }
+    list_add_before(le, &(base->page_link));
+#endif
 }
 
 static size_t

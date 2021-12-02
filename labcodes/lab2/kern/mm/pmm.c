@@ -347,19 +347,45 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
      *   PTE_W           0x002                   // page table/directory entry flags bit : Writeable
      *   PTE_U           0x004                   // page table/directory entry flags bit : User can access
      */
-#if 0
-    pde_t *pdep = NULL;   // (1) find page directory entry
-    if (0) {              // (2) check if entry is not present
-                          // (3) check if creating is needed, then alloc page for page table
-                          // CAUTION: this page is used for page table, not for common data page
-                          // (4) set page reference
-        uintptr_t pa = 0; // (5) get linear address of page
-                          // (6) clear page content using memset
-                          // (7) set page directory entry's permission
+
+  
+/*
+    // 获取传入的线性地址中所对应的页目录条目的物理地址
+    pde_t *pdep = &pgdir[PDX(la)];
+    // 如果该条目不可用(not present)
+    if (!(*pdep & PTE_P)) {
+        struct Page *page;
+        // 如果分配页面失败，或者不允许分配，则返回NULL
+        if (!create || (page = alloc_page()) == NULL)
+            return NULL;
+        // 设置该物理页面的引用次数为1
+        set_page_ref(page, 1);
+        // 获取当前物理页面所管理的物理地址
+        uintptr_t pa = page2pa(page);
+        // 清空该物理页面的数据。需要注意的是使用虚拟地址
+        memset(KADDR(pa), 0, PGSIZE);
+        // 将新分配的页面设置为当前缺失的页目录条目中
+        // 之后该页面就是其中的一个二级页面
+        *pdep = pa | PTE_U | PTE_W | PTE_P;
     }
-    return NULL;          // (8) return page table entry
-#endif
+
+    // 返回在pgdir中对应于la的二级页表项
+    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];
+*/
+    pde_t *pdep = &pgdir[PDX(la)];
+    if (!(*pdep & PTE_P)) {
+        struct Page *page;
+        if (!create || (page = alloc_page()) == NULL) {
+            return NULL;
+        }
+        set_page_ref(page, 1);
+        uintptr_t pa = page2pa(page);
+        memset(KADDR(pa), 0, PGSIZE);
+        *pdep = pa | PTE_U | PTE_W | PTE_P;
+    }
+    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];
 }
+
 
 //get_page - get related Page struct for linear address la using PDT pgdir
 struct Page *
@@ -404,6 +430,19 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
                                   //(6) flush tlb
     }
 #endif
+    // 如果传入的页表条目是可用的
+    if (*ptep & PTE_P) {
+        // 获取该页表条目所对应的地址
+        struct Page *page = pte2page(*ptep);
+        // 如果该页的引用次数在减1后为0
+        if (page_ref_dec(page) == 0)
+            // 释放当前页
+            free_page(page);
+        // 清空PTE
+        *ptep = 0;
+        // 刷新TLB内的数据
+        tlb_invalidate(pgdir, la);
+    }
 }
 
 //page_remove - free an Page which is related linear address la and has an validated pte
