@@ -396,6 +396,39 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
         }
    }
 #endif
+
+    /*LAB3 EXERCISE 1: YOUR CODE*/
+    if ((ptep = get_pte(mm->pgdir, addr, 1)) == NULL) { // 查找当前虚拟地址所对应的页表项
+        cprintf("get_pte in do_pgfault failed\n");
+        goto failed;
+    }
+    
+    if (*ptep == 0) { // 如果这个页表项所对应的物理页不存在，则分配一块物理页，并设置页表项
+        if (pgdir_alloc_page(mm->pgdir, addr, perm) == NULL) {
+            cprintf("pgdir_alloc_page in do_pgfault failed\n");
+            goto failed;
+        }
+    }
+    else { // 如果这个页表项所对应的物理页存在，但不在内存中
+           // 如果swap已经初始化完成
+        if(swap_init_ok) { // 将目标数据加载到某块新的物理页中。将目标数据加载到某块新的物理页中
+	    // 该物理页可能是尚未分配的物理页，也可能是从别的已分配物理页中取的
+            struct Page *page=NULL;
+            if ((ret = swap_in(mm, addr, &page)) != 0) {
+                cprintf("swap_in in do_pgfault failed\n");
+                goto failed;
+            }    
+	    // 将该物理页与对应的虚拟地址关联，同时设置页表。
+	    // 当前缺失的页已经加载回内存中，所以设置当前页为可swap。
+            page_insert(mm->pgdir, page, addr, perm);
+            swap_map_swappable(mm, addr, page, 1);
+            page->pra_vaddr = addr;
+        }
+        else {
+            cprintf("no swap_init_ok but ptep is %x, failed\n",*ptep);
+            goto failed;
+        }
+   }
    ret = 0;
 failed:
     return ret;
