@@ -275,15 +275,13 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
         goto fork_out;
     // 第二步：将子进程的父节点设置为当前进程
     proc->parent = current;
-    // 第三步：调用setup_stack()函数为进程分配一个内核栈
+
     if (setup_kstack(proc) != 0) 
         goto bad_fork_cleanup_proc;
-    // 第四步：调用copy_mm()函数复制父进程的内存信息到子进程
     if (copy_mm(clone_flags, proc) != 0)
         goto bad_fork_cleanup_kstack;
-    //第五步：调用copy_thread()函数复制父进程的中断帧和上下文信息   
     copy_thread(proc, stack, tf);
-    //第六步：将新进程添加到进程的（hash）列表中
+
     bool intr_flag;
     local_intr_save(intr_flag);
     {
@@ -293,9 +291,7 @@ do_fork(uint32_t clone_flags, uintptr_t stack, struct trapframe *tf) {
         nr_process ++;
     }
     local_intr_restore(intr_flag);
-    //步骤七：唤醒子进程
     wakeup_proc(proc);
-    //步骤八：返回子进程的pid
     ret = proc->pid;
 
 fork_out:
