@@ -507,7 +507,6 @@ copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
         uint32_t perm = (*ptep & PTE_USER);
         //get page from ptep
         struct Page *page = pte2page(*ptep);
-	//为B分一个页的空间
         // alloc a page for process B
         struct Page *npage=alloc_page();
         assert(page!=NULL);
@@ -527,14 +526,14 @@ copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
          * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
          * (4) build the map of phy addr of  nage with the linear addr start
          */
-		// (1)获取源页面所在的虚拟地址src_kvaddr
-		void * kva_src = page2kva(page);
-		// (2)获取目标页面所在的虚拟地址dst_kvaddr
-		void * kva_dst = page2kva(npage);
-		// (3)页面数据复制，父进程 -> 子进程
-		memcpy(kva_dst, kva_src, PGSIZE);
-		// (4)将该页面设置至对应的PTE中,建立映射关系
-		ret = page_insert(to, npage, start, perm);
+	// (1)获取源页面所在的虚拟地址src_kvaddr
+	void * kva_src = page2kva(page);
+	// (2)获取目标页面所在的虚拟地址dst_kvaddr
+	void * kva_dst = page2kva(npage);
+	// (3)页面数据复制，父进程 -> 子进程
+	memcpy(kva_dst, kva_src, PGSIZE);
+	// (4)将该页面设置至对应的PTE中,建立映射关系
+	ret = page_insert(to, npage, start, perm);
 
         assert(ret == 0);
         }
