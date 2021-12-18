@@ -375,6 +375,19 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     }
     return NULL;          // (8) return page table entry
 #endif
+	// 填充代码
+    pde_t *pdep = &pgdir[PDX(la)];
+    if (!(*pdep & PTE_P)) {
+        struct Page *page;
+        if (!create || (page = alloc_page()) == NULL) {
+            return NULL;
+        }
+        set_page_ref(page, 1);
+        uintptr_t pa = page2pa(page);
+        memset(KADDR(pa), 0, PGSIZE);
+        *pdep = pa | PTE_U | PTE_W | PTE_P;
+    }
+    return &((pte_t *)KADDR(PDE_ADDR(*pdep)))[PTX(la)];
 }
 
 //get_page - get related Page struct for linear address la using PDT pgdir
@@ -420,6 +433,15 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
                                   //(6) flush tlb
     }
 #endif
+	// 填充代码
+    if (*ptep & PTE_P) {
+        struct Page *page = pte2page(*ptep);
+        if (page_ref_dec(page) == 0) {
+            free_page(page);
+        }
+        *ptep = 0;
+        tlb_invalidate(pgdir, la);
+    }
 }
 
 void
@@ -464,11 +486,14 @@ exit_range(pde_t *pgdir, uintptr_t start, uintptr_t end) {
  */
 int
 copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
+    //将实际的代码段和数据段搬到新的子进程里面去，再设置好页表的相关内容
     assert(start % PGSIZE == 0 && end % PGSIZE == 0);
     assert(USER_ACCESS(start, end));
     // copy content by page unit.
+    //以页为单位进行复制
     do {
         //call get_pte to find process A's pte according to the addr start
+         //得到A&B的pte地址
         pte_t *ptep = get_pte(from, start, 0), *nptep;
         if (ptep == NULL) {
             start = ROUNDDOWN(start + PTSIZE, PTSIZE);
@@ -482,6 +507,7 @@ copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
         uint32_t perm = (*ptep & PTE_USER);
         //get page from ptep
         struct Page *page = pte2page(*ptep);
+	//为B分一个页的空间
         // alloc a page for process B
         struct Page *npage=alloc_page();
         assert(page!=NULL);
@@ -501,6 +527,16 @@ copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
          * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
          * (4) build the map of phy addr of  nage with the linear addr start
          */
+		// (1)获取源页面所在的虚拟地址src_kvaddr
+		void * kva_src = page2kva(page);
+		// (2)获取目标页面所在的虚拟地址dst_kvaddr
+		void * kva_dst = page2kva(npage);
+		// (3)页面数据复制，父进程 -> 子进程
+		memcpy(kva_dst, kva_src, PGSIZE);
+		// (4)将该页面设置至对应的PTE中,建立映射关系
+		ret = page_insert(to, npage, start, perm);
+
+        ret = page_insert(to, npage, start, perm);
         assert(ret == 0);
         }
         start += PGSIZE;
@@ -670,7 +706,10 @@ check_boot_pgdir(void) {
     free_page(p);
     free_page(pde2page(boot_pgdir[0]));
     boot_pgdir[0] = 0;
-
+    
+    tlb_invalidate(boot_pgdir, 0x100);
+    tlb_invalidate(boot_pgdir, 0x100+PGSIZE);
+    
     cprintf("check_boot_pgdir() succeeded!\n");
 }
 
